@@ -2,5 +2,6 @@
 package all
 
 import (
+	_ "github.com/grafana/agent/component/foo/bar"    // Import foo.bar
 	_ "github.com/grafana/agent/component/local/file" // Import local.file
 )
