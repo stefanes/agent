@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-kit/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +25,7 @@ func TestMimirClient_X(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := New(Config{
+	client, err := New(log.NewNopLogger(), Config{
 		Address: ts.URL,
 		ID:      "my-id",
 		Key:     "my-key",
