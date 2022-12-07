@@ -116,14 +116,7 @@ func (r *MimirClient) doRequest(path, method string, payload io.Reader, contentL
 
 	switch {
 	case (r.user != "" || r.key != "") && r.authToken != "":
-		err := errors.New("at most one of basic auth or auth token should be configured")
-		level.Error(r.logger).Log(
-			"msg", "error during setting up request to mimir api",
-			"url", req.URL.String(),
-			"method", req.Method,
-			"error", err,
-		)
-		return nil, err
+		return nil, errors.New("at most one of basic auth or auth token should be configured")
 
 	case r.user != "":
 		req.SetBasicAuth(r.user, r.key)
@@ -137,24 +130,12 @@ func (r *MimirClient) doRequest(path, method string, payload io.Reader, contentL
 
 	req.Header.Add(user.OrgIDHeaderName, r.id)
 
-	level.Debug(r.logger).Log(
-		"msg", "sending request to Grafana Mimir API",
-		"url", req.URL.String(),
-		"method", req.Method,
-	)
-
 	resp, err := r.Client.Do(req)
 	if err != nil {
-		level.Error(r.logger).Log(
-			"msg", "error during request to Grafana Mimir API",
-			"url", req.URL.String(),
-			"method", req.Method,
-			"error", err,
-		)
 		return nil, err
 	}
 
-	if err := checkResponse(r.logger, resp); err != nil {
+	if err := checkResponse(resp); err != nil {
 		_ = resp.Body.Close()
 		return nil, errors.Wrapf(err, "%s request to %s failed", req.Method, req.URL.String())
 	}
@@ -163,8 +144,7 @@ func (r *MimirClient) doRequest(path, method string, payload io.Reader, contentL
 }
 
 // checkResponse checks an API response for errors.
-func checkResponse(logger log.Logger, r *http.Response) error {
-	level.Debug(logger).Log("msg", "checking response", "status", r.Status)
+func checkResponse(r *http.Response) error {
 	if 200 <= r.StatusCode && r.StatusCode <= 299 {
 		return nil
 	}
@@ -176,15 +156,11 @@ func checkResponse(logger log.Logger, r *http.Response) error {
 	bodyStr := string(bodyHead)
 	const msg = "response"
 	if r.StatusCode == http.StatusNotFound {
-		level.Debug(logger).Log("msg", msg, "status", r.Status, "body", bodyStr)
 		return ErrResourceNotFound
 	}
 	if r.StatusCode == http.StatusConflict {
-		level.Debug(logger).Log("msg", msg, "status", r.Status, "body", bodyStr)
 		return errConflict
 	}
-
-	level.Error(logger).Log("msg", msg, "status", r.Status, "body", bodyStr)
 
 	var errMsg string
 	if bodyStr == "" {
