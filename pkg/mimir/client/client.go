@@ -16,7 +16,10 @@ import (
 	log "github.com/go-kit/log"
 	"github.com/grafana/dskit/crypto/tls"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/statsd_exporter/pkg/level"
+	weaveworksClient "github.com/weaveworks/common/http/client"
+	"github.com/weaveworks/common/instrument"
 	"github.com/weaveworks/common/user"
 )
 
@@ -53,14 +56,14 @@ type MimirClient struct {
 	key       string
 	id        string
 	endpoint  *url.URL
-	Client    http.Client
+	Client    weaveworksClient.Requester
 	apiPath   string
 	authToken string
 	logger    log.Logger
 }
 
 // New returns a new MimirClient.
-func New(logger log.Logger, cfg Config) (*MimirClient, error) {
+func New(logger log.Logger, cfg Config, timingHistogram *prometheus.HistogramVec) (*MimirClient, error) {
 	endpoint, err := url.Parse(cfg.Address)
 	if err != nil {
 		return nil, err
@@ -68,7 +71,7 @@ func New(logger log.Logger, cfg Config) (*MimirClient, error) {
 
 	level.Debug(logger).Log("msg", "New Mimir client created", "address", cfg.Address, "id", cfg.ID)
 
-	client := http.Client{}
+	client := &http.Client{}
 
 	// Setup TLS client
 	tlsConfig, err := cfg.TLS.GetTLSConfig()
@@ -88,7 +91,7 @@ func New(logger log.Logger, cfg Config) (*MimirClient, error) {
 			Proxy:           http.ProxyFromEnvironment,
 			TLSClientConfig: tlsConfig,
 		}
-		client = http.Client{Transport: transport}
+		client = &http.Client{Transport: transport}
 	}
 
 	path := rulerAPIPath
@@ -96,20 +99,23 @@ func New(logger log.Logger, cfg Config) (*MimirClient, error) {
 		path = legacyAPIPath
 	}
 
+	collector := instrument.NewHistogramCollector(timingHistogram)
+	timedClient := weaveworksClient.NewTimedClient(client, collector)
+
 	return &MimirClient{
 		user:      cfg.User,
 		key:       cfg.Key,
 		id:        cfg.ID,
 		endpoint:  endpoint,
-		Client:    client,
+		Client:    timedClient,
 		apiPath:   path,
 		authToken: cfg.AuthToken,
 		logger:    logger,
 	}, nil
 }
 
-func (r *MimirClient) doRequest(path, method string, payload io.Reader, contentLength int64) (*http.Response, error) {
-	req, err := buildRequest(path, method, *r.endpoint, payload, contentLength)
+func (r *MimirClient) doRequest(operation, path, method string, payload io.Reader, contentLength int64) (*http.Response, error) {
+	req, err := buildRequest(operation, path, method, *r.endpoint, payload, contentLength)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +184,7 @@ func joinPath(baseURLPath, targetPath string) string {
 	return strings.TrimSuffix(baseURLPath, "/") + targetPath
 }
 
-func buildRequest(p, m string, endpoint url.URL, payload io.Reader, contentLength int64) (*http.Request, error) {
+func buildRequest(op, p, m string, endpoint url.URL, payload io.Reader, contentLength int64) (*http.Request, error) {
 	// parse path parameter again (as it already contains escaped path information
 	pURL, err := url.Parse(p)
 	if err != nil {
@@ -198,5 +204,8 @@ func buildRequest(p, m string, endpoint url.URL, payload io.Reader, contentLengt
 	if contentLength >= 0 {
 		r.ContentLength = contentLength
 	}
+
+	r = r.WithContext(context.WithValue(r.Context(), weaveworksClient.OperationNameContextKey, op))
+
 	return r, nil
 }

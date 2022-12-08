@@ -13,7 +13,9 @@ import (
 	"testing"
 
 	"github.com/go-kit/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
+	"github.com/weaveworks/common/instrument"
 )
 
 func TestMimirClient_X(t *testing.T) {
@@ -29,7 +31,7 @@ func TestMimirClient_X(t *testing.T) {
 		Address: ts.URL,
 		ID:      "my-id",
 		Key:     "my-key",
-	})
+	}, prometheus.NewHistogramVec(prometheus.HistogramOpts{}, instrument.HistogramCollectorBuckets))
 	require.NoError(t, err)
 
 	for _, tc := range []struct {
