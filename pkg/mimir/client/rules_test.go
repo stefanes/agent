@@ -77,5 +77,4 @@ func TestMimirClient_X(t *testing.T) {
 			require.Equal(t, tc.expURLPath, req.URL.EscapedPath())
 		})
 	}
-
 }

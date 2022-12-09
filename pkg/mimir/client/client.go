@@ -7,6 +7,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,6 @@ import (
 	"strings"
 
 	log "github.com/go-kit/log"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/config"
 	weaveworksClient "github.com/weaveworks/common/http/client"
@@ -101,7 +101,7 @@ func (r *MimirClient) doRequest(operation, path, method string, payload io.Reade
 
 	if err := checkResponse(resp); err != nil {
 		_ = resp.Body.Close()
-		return nil, errors.Wrapf(err, "%s request to %s failed", req.Method, req.URL.String())
+		return nil, fmt.Errorf("error %s %s: %w", method, path, err)
 	}
 
 	return resp, nil
@@ -115,10 +115,9 @@ func checkResponse(r *http.Response) error {
 
 	bodyHead, err := io.ReadAll(io.LimitReader(r.Body, 1024))
 	if err != nil {
-		return errors.Wrapf(err, "reading body")
+		return fmt.Errorf("error reading response body: %w", err)
 	}
 	bodyStr := string(bodyHead)
-	const msg = "response"
 	if r.StatusCode == http.StatusNotFound {
 		return ErrResourceNotFound
 	}
