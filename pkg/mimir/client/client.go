@@ -14,10 +14,9 @@ import (
 	"strings"
 
 	log "github.com/go-kit/log"
-	"github.com/grafana/dskit/crypto/tls"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/statsd_exporter/pkg/level"
+	"github.com/prometheus/common/config"
 	weaveworksClient "github.com/weaveworks/common/http/client"
 	"github.com/weaveworks/common/instrument"
 	"github.com/weaveworks/common/user"
@@ -35,13 +34,10 @@ var (
 
 // Config is used to configure a MimirClient.
 type Config struct {
-	User            string `yaml:"user"`
-	Key             string `yaml:"key"`
-	Address         string `yaml:"address"`
-	ID              string `yaml:"id"`
-	TLS             tls.ClientConfig
-	UseLegacyRoutes bool   `yaml:"use_legacy_routes"`
-	AuthToken       string `yaml:"auth_token"`
+	ID               string
+	Address          string
+	UseLegacyRoutes  bool
+	HTTPClientConfig config.HTTPClientConfig
 }
 
 type Interface interface {
@@ -52,14 +48,12 @@ type Interface interface {
 
 // MimirClient is a client to the Mimir API.
 type MimirClient struct {
-	user      string
-	key       string
-	id        string
-	endpoint  *url.URL
-	Client    weaveworksClient.Requester
-	apiPath   string
-	authToken string
-	logger    log.Logger
+	id string
+
+	endpoint *url.URL
+	client   weaveworksClient.Requester
+	apiPath  string
+	logger   log.Logger
 }
 
 // New returns a new MimirClient.
@@ -68,30 +62,9 @@ func New(logger log.Logger, cfg Config, timingHistogram *prometheus.HistogramVec
 	if err != nil {
 		return nil, err
 	}
-
-	level.Debug(logger).Log("msg", "New Mimir client created", "address", cfg.Address, "id", cfg.ID)
-
-	client := &http.Client{}
-
-	// Setup TLS client
-	tlsConfig, err := cfg.TLS.GetTLSConfig()
+	client, err := config.NewClientFromConfig(cfg.HTTPClientConfig, "GrafanaAgent", config.WithHTTP2Disabled())
 	if err != nil {
-		level.Error(logger).Log(
-			"msg", "error loading TLS files",
-			"tls-ca", cfg.TLS.CAPath,
-			"tls-cert", cfg.TLS.CertPath,
-			"tls-key", cfg.TLS.KeyPath,
-			"err", err,
-		)
-		return nil, fmt.Errorf("Mimir client initialization unsuccessful")
-	}
-
-	if tlsConfig != nil {
-		transport := &http.Transport{
-			Proxy:           http.ProxyFromEnvironment,
-			TLSClientConfig: tlsConfig,
-		}
-		client = &http.Client{Transport: transport}
+		return nil, err
 	}
 
 	path := rulerAPIPath
@@ -103,14 +76,11 @@ func New(logger log.Logger, cfg Config, timingHistogram *prometheus.HistogramVec
 	timedClient := weaveworksClient.NewTimedClient(client, collector)
 
 	return &MimirClient{
-		user:      cfg.User,
-		key:       cfg.Key,
-		id:        cfg.ID,
-		endpoint:  endpoint,
-		Client:    timedClient,
-		apiPath:   path,
-		authToken: cfg.AuthToken,
-		logger:    logger,
+		id:       cfg.ID,
+		endpoint: endpoint,
+		client:   timedClient,
+		apiPath:  path,
+		logger:   logger,
 	}, nil
 }
 
@@ -120,23 +90,11 @@ func (r *MimirClient) doRequest(operation, path, method string, payload io.Reade
 		return nil, err
 	}
 
-	switch {
-	case (r.user != "" || r.key != "") && r.authToken != "":
-		return nil, errors.New("at most one of basic auth or auth token should be configured")
-
-	case r.user != "":
-		req.SetBasicAuth(r.user, r.key)
-
-	case r.key != "":
-		req.SetBasicAuth(r.id, r.key)
-
-	case r.authToken != "":
-		req.Header.Add("Authorization", "Bearer "+r.authToken)
+	if r.id != "" {
+		req.Header.Add(user.OrgIDHeaderName, r.id)
 	}
 
-	req.Header.Add(user.OrgIDHeaderName, r.id)
-
-	resp, err := r.Client.Do(req)
+	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, err
 	}

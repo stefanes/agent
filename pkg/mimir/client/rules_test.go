@@ -29,8 +29,6 @@ func TestMimirClient_X(t *testing.T) {
 
 	client, err := New(log.NewNopLogger(), Config{
 		Address: ts.URL,
-		ID:      "my-id",
-		Key:     "my-key",
 	}, prometheus.NewHistogramVec(prometheus.HistogramOpts{}, instrument.HistogramCollectorBuckets))
 	require.NoError(t, err)
 
